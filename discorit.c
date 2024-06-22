@@ -16,10 +16,8 @@
 // Function prototypes
 int register_user(int sockfd, const char *username, const char *password);
 int login_user(int sockfd, const char *username, const char *password);
-void create_channel(int sockfd, const char *username, const char *channel_name, const char *key);
-void list_channels(int sockfd, const char *username);
-void edit_channel(int sockfd, const char *username, const char *old_channel, const char *new_channel);
-void delete_channel(int sockfd, const char *username, const char *channel_name);
+void create_channel(int sockfd, const char *channel_name, const char *key);
+void list_channels(int sockfd);
 void join_channel(int sockfd, const char *channel_name, const char *key);
 void join_room(int sockfd, const char *room_name);
 void send_chat(int sockfd, const char *message);
@@ -81,17 +79,9 @@ int main(int argc, char *argv[]) {
                 if (strncmp(command, "CREATE CHANNEL", 14) == 0) {
                     char *channel_name = strtok(command + 15, " ");
                     char *key = strtok(NULL, " ");
-                    create_channel(sockfd, argv[2], channel_name, key);
+                    create_channel(sockfd, channel_name, key);
                 } else if (strncmp(command, "LIST CHANNELS", 13) == 0) {
-                    list_channels(sockfd, argv[2]);
-                } else if (strncmp(command, "EDIT CHANNEL", 12) == 0) {
-                    char *old_channel = strtok(command + 13, " ");
-                    strtok(NULL, " "); // Skip "TO"
-                    char *new_channel = strtok(NULL, " ");
-                    edit_channel(sockfd, argv[2], old_channel, new_channel);
-                } else if (strncmp(command, "DEL CHANNEL", 11) == 0) {
-                    char *channel_name = strtok(command + 12, " ");
-                    delete_channel(sockfd, argv[2], channel_name);
+                    list_channels(sockfd);
                 } else if (strncmp(command, "JOIN CHANNEL", 12) == 0) {
                     char *channel_name = strtok(command + 13, " ");
                     char *key = strtok(NULL, " ");
@@ -111,63 +101,31 @@ int main(int argc, char *argv[]) {
     return 0;
 }
 
-void create_channel(int sockfd, const char *username, const char *channel_name, const char *key) {
+void create_channel(int sockfd, const char *channel_name, const char *key) {
     char buffer[MAX];
-    snprintf(buffer, sizeof(buffer), "CREATE CHANNEL %s %s %s", username, channel_name, key);
+    snprintf(buffer, sizeof(buffer), "CREATE CHANNEL %s %s", channel_name, key);
     write(sockfd, buffer, strlen(buffer));
     int n = read(sockfd, buffer, sizeof(buffer) - 1);
     buffer[n] = '\0';
     printf("Server response: %s\n", buffer);
-    if (strcmp(buffer, "CREATE CHANNEL SUCCESS") == 0) {
-        printf("Channel %s dibuat\n", channel_name);
-    } else {
-        printf("Gagal membuat channel %s\n", channel_name);
-    }
 }
 
-void list_channels(int sockfd, const char *username) {
+void list_channels(int sockfd) {
     char buffer[MAX];
-    snprintf(buffer, sizeof(buffer), "LIST CHANNELS %s", username);
+    snprintf(buffer, sizeof(buffer), "LIST CHANNELS");
     write(sockfd, buffer, strlen(buffer));
     int n = read(sockfd, buffer, sizeof(buffer) - 1);
     buffer[n] = '\0';
-    printf("Daftar channel:\n%s\n", buffer);
-}
-
-void edit_channel(int sockfd, const char *username, const char *old_channel, const char *new_channel) {
-    char buffer[MAX];
-    snprintf(buffer, sizeof(buffer), "EDIT CHANNEL %s %s TO %s", username, old_channel, new_channel);
-    write(sockfd, buffer, strlen(buffer));
-    int n = read(sockfd, buffer, sizeof(buffer) - 1);
-    buffer[n] = '\0';
-    if (strcmp(buffer, "EDIT CHANNEL SUCCESS") == 0) {
-        printf("%s berhasil diubah menjadi %s\n", old_channel, new_channel);
-    } else {
-        printf("Gagal mengubah %s menjadi %s\n", old_channel, new_channel);
-    }
-}
-
-void delete_channel(int sockfd, const char *username, const char *channel_name) {
-    char buffer[MAX];
-    snprintf(buffer, sizeof(buffer), "DEL CHANNEL %s %s", username, channel_name);
-    write(sockfd, buffer, strlen(buffer));
-    int n = read(sockfd, buffer, sizeof(buffer) - 1);
-    buffer[n] = '\0';
-    if (strcmp(buffer, "DELETE CHANNEL SUCCESS") == 0) {
-        printf("Channel %s berhasil dihapus\n", channel_name);
-    } else {
-        printf("Gagal menghapus channel %s\n", channel_name);
-    }
+    printf("Server response: %s\n", buffer);
 }
 
 void join_channel(int sockfd, const char *channel_name, const char *key) {
-    // Implement join_channel logic
     char buffer[MAX];
     snprintf(buffer, sizeof(buffer), "JOIN CHANNEL %s %s", channel_name, key);
     write(sockfd, buffer, strlen(buffer));
     int n = read(sockfd, buffer, sizeof(buffer) - 1);
     buffer[n] = '\0';
-    printf("Server response: %s\n", buffer); // Debug log
+    printf("Server response: %s\n", buffer);
 }
 
 // Implement other functions (join_room, send_chat, etc.) here
@@ -178,7 +136,6 @@ int register_user(int sockfd, const char *username, const char *password) {
     write(sockfd, buffer, strlen(buffer));
     int n = read(sockfd, buffer, sizeof(buffer) - 1);
     buffer[n] = '\0';
-    printf("Server response: %s\n", buffer); // Debug log
     return strcmp(buffer, "REGISTER SUCCESS") == 0;
 }
 
@@ -188,6 +145,5 @@ int login_user(int sockfd, const char *username, const char *password) {
     write(sockfd, buffer, strlen(buffer));
     int n = read(sockfd, buffer, sizeof(buffer) - 1);
     buffer[n] = '\0';
-    printf("Server response: %s\n", buffer); // Debug log
     return strcmp(buffer, "LOGIN SUCCESS") == 0;
 }
