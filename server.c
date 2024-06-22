@@ -22,14 +22,11 @@ const char *CHANNELS_FILE_PATH = "/Users/rrrreins/sisop/funproject/DiscorIT_dir/
 void *handle_client(void *arg);
 void register_user(int connfd, const char *username, const char *password);
 void login_user(int connfd, const char *username, const char *password);
-void create_channel(int connfd, const char *username, const char *channel_name, const char *key);
-void list_channels(int connfd, const char *username);
-void edit_channel(int connfd, const char *username, const char *old_channel, const char *new_channel);
-void delete_channel(int connfd, const char *username, const char *channel_name);
+void create_channel(int connfd, const char *channel_name, const char *key);
 void generate_salt(unsigned char *salt);
 void hash_password(const char *password, const unsigned char *salt, unsigned char *hashed_password);
 int get_next_user_id(FILE *file);
-void log_user_activity(const char *username, const char *activity, const char *channel_name);
+int get_next_channel_id(FILE *file);
 
 int main() {
     int sockfd, connfd;
@@ -90,27 +87,18 @@ void *handle_client(void *arg) {
 
         // Parse command and handle request
         char *command = strtok(buffer, " ");
-        char *username = strtok(NULL, " ");
         if (strcmp(command, "REGISTER") == 0) {
+            char *username = strtok(NULL, " ");
             char *password = strtok(NULL, " ");
             register_user(connfd, username, password);
         } else if (strcmp(command, "LOGIN") == 0) {
+            char *username = strtok(NULL, " ");
             char *password = strtok(NULL, " ");
             login_user(connfd, username, password);
         } else if (strcmp(command, "CREATE") == 0 && strcmp(strtok(NULL, " "), "CHANNEL") == 0) {
             char *channel_name = strtok(NULL, " ");
             char *key = strtok(NULL, " ");
-            create_channel(connfd, username, channel_name, key);
-        } else if (strcmp(command, "LIST") == 0 && strcmp(strtok(NULL, " "), "CHANNELS") == 0) {
-            list_channels(connfd, username);
-        } else if (strcmp(command, "EDIT") == 0 && strcmp(strtok(NULL, " "), "CHANNEL") == 0) {
-            char *old_channel = strtok(NULL, " ");
-            strtok(NULL, " "); // Skip "TO"
-            char *new_channel = strtok(NULL, " ");
-            edit_channel(connfd, username, old_channel, new_channel);
-        } else if (strcmp(command, "DEL") == 0 && strcmp(strtok(NULL, " "), "CHANNEL") == 0) {
-            char *channel_name = strtok(NULL, " ");
-            delete_channel(connfd, username, channel_name);
+            create_channel(connfd, channel_name, key);
         }
     }
 
@@ -118,7 +106,7 @@ void *handle_client(void *arg) {
     pthread_exit(NULL);
 }
 
-void create_channel(int connfd, const char *username, const char *channel_name, const char *key) {
+void create_channel(int connfd, const char *channel_name, const char *key) {
     char path[MAX];
     snprintf(path, sizeof(path), "/Users/rrrreins/sisop/funproject/DiscorIT_dir/%s", channel_name);
 
@@ -153,115 +141,32 @@ void create_channel(int connfd, const char *username, const char *channel_name, 
     file = fopen(chat2_file, "w"); fclose(file);
     file = fopen(chat3_file, "w"); fclose(file);
 
-    // Log channel creation in channels.csv
-    file = fopen(CHANNELS_FILE_PATH, "a");
-    if (file != NULL) {
-        fprintf(file, "%s,%s\n", channel_name, key);
-        fclose(file);
+    unsigned char salt[SALT_SIZE];
+    unsigned char hashed_key[HASH_SIZE];
+    generate_salt(salt);
+    hash_password(key, salt, hashed_key);
+
+    file = fopen(CHANNELS_FILE_PATH, "a+");
+    if (file == NULL) {
+        perror("Failed to open channels.csv");
+        write(connfd, "CREATE CHANNEL FAILED", strlen("CREATE CHANNEL FAILED"));
+        return;
     }
 
-    // Log user activity in users.log
-    char activity[MAX];
-    snprintf(activity, sizeof(activity), "CREATE CHANNEL %s -k %s", channel_name, key);
-    log_user_activity(username, activity, channel_name);
+    int id = get_next_channel_id(file);
+
+    fprintf(file, "%d,%s,", id, channel_name);
+    for (int i = 0; i < SALT_SIZE; i++) {
+        fprintf(file, "%02x", salt[i]);
+    }
+    fprintf(file, ",");
+    for (int i = 0; i < HASH_SIZE; i++) {
+        fprintf(file, "%02x", hashed_key[i]);
+    }
+    fprintf(file, "\n");
+    fclose(file);
 
     write(connfd, "CREATE CHANNEL SUCCESS", strlen("CREATE CHANNEL SUCCESS"));
-}
-
-void list_channels(int connfd, const char *username) {
-    FILE *file = fopen(CHANNELS_FILE_PATH, "r");
-    if (file == NULL) {
-        perror("Failed to open channels.csv");
-        write(connfd, "LIST CHANNELS FAILED", strlen("LIST CHANNELS FAILED"));
-        return;
-    }
-
-    char line[MAX];
-    while (fgets(line, sizeof(line), file)) {
-        write(connfd, line, strlen(line));
-    }
-
-    fclose(file);
-    log_user_activity(username, "LIST CHANNELS", NULL);
-}
-
-void edit_channel(int connfd, const char *username, const char *old_channel, const char *new_channel) {
-    FILE *file = fopen(CHANNELS_FILE_PATH, "r+");
-    if (file == NULL) {
-        perror("Failed to open channels.csv");
-        write(connfd, "EDIT CHANNEL FAILED", strlen("EDIT CHANNEL FAILED"));
-        return;
-    }
-
-    char line[MAX];
-    int found = 0;
-    long pos;
-    while ((pos = ftell(file)) != -1 && fgets(line, sizeof(line), file)) {
-        char *token = strtok(line, ",");
-        if (strcmp(token, old_channel) == 0) {
-            found = 1;
-            fseek(file, pos, SEEK_SET);
-            fprintf(file, "%s,", new_channel);
-            break;
-        }
-    }
-
-    fclose(file);
-
-    if (found) {
-        char old_path[MAX], new_path[MAX];
-        snprintf(old_path, sizeof(old_path), "/Users/rrrreins/sisop/funproject/DiscorIT_dir/%s", old_channel);
-        snprintf(new_path, sizeof(new_path), "/Users/rrrreins/sisop/funproject/DiscorIT_dir/%s", new_channel);
-        rename(old_path, new_path);
-        char activity[MAX];
-        snprintf(activity, sizeof(activity), "EDIT CHANNEL %s TO %s", old_channel, new_channel);
-        log_user_activity(username, activity, new_channel);
-        write(connfd, "EDIT CHANNEL SUCCESS", strlen("EDIT CHANNEL SUCCESS"));
-    } else {
-        write(connfd, "EDIT CHANNEL FAILED", strlen("EDIT CHANNEL FAILED"));
-    }
-}
-
-void delete_channel(int connfd, const char *username, const char *channel_name) {
-    FILE *file = fopen(CHANNELS_FILE_PATH, "r");
-    FILE *temp_file = fopen("/Users/rrrreins/sisop/funproject/DiscorIT_dir/temp.csv", "w");
-    if (file == NULL || temp_file == NULL) {
-        perror("Failed to open channels.csv or temp.csv");
-        write(connfd, "DELETE CHANNEL FAILED", strlen("DELETE CHANNEL FAILED"));
-        return;
-    }
-
-    char line[MAX];
-    int found = 0;
-    while (fgets(line, sizeof(line), file)) {
-        char *token = strtok(line, ",");
-        if (strcmp(token, channel_name) != 0) {
-            fputs(line, temp_file);
-        } else {
-            found = 1;
-        }
-    }
-
-    fclose(file);
-    fclose(temp_file);
-
-    remove(CHANNELS_FILE_PATH);
-    rename("/Users/rrrreins/sisop/funproject/DiscorIT_dir/temp.csv", CHANNELS_FILE_PATH);
-
-    if (found) {
-        char path[MAX];
-        snprintf(path, sizeof(path), "/Users/rrrreins/sisop/funproject/DiscorIT_dir/%s", channel_name);
-        // Remove the directory and its contents
-        char command[MAX];
-        snprintf(command, sizeof(command), "rm -rf %s", path);
-        system(command);
-        char activity[MAX];
-        snprintf(activity, sizeof(activity), "DEL CHANNEL %s", channel_name);
-        log_user_activity(username, activity, NULL);
-        write(connfd, "DELETE CHANNEL SUCCESS", strlen("DELETE CHANNEL SUCCESS"));
-    } else {
-        write(connfd, "DELETE CHANNEL FAILED", strlen("DELETE CHANNEL FAILED"));
-    }
 }
 
 void register_user(int connfd, const char *username, const char *password) {
@@ -395,17 +300,11 @@ int get_next_user_id(FILE *file) {
     return id;
 }
 
-void log_user_activity(const char *username, const char *activity, const char *channel_name) {
-    char user_log_path[MAX];
-    if (channel_name != NULL) {
-        snprintf(user_log_path, sizeof(user_log_path), "/Users/rrrreins/sisop/funproject/DiscorIT_dir/%s/admin/user.log", channel_name);
-    } else {
-        snprintf(user_log_path, sizeof(user_log_path), "/Users/rrrreins/sisop/funproject/DiscorIT_dir/users.log");
+int get_next_channel_id(FILE *file) {
+    int id = 1;
+    char line[MAX];
+    while (fgets(line, sizeof(line), file)) {
+        id++;
     }
-
-    FILE *file = fopen(user_log_path, "a");
-    if (file != NULL) {
-        fprintf(file, "[%s] %s\n", username, activity);
-        fclose(file);
-    }
+    return id;
 }
