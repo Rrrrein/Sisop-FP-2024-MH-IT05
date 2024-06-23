@@ -6,27 +6,20 @@
 #include <pthread.h>
 #include <sys/stat.h>
 #include <sys/types.h>
-#include <openssl/rand.h>
-#include <openssl/evp.h>
 
 #define MAX 1024
 #define PORT 8080
 #define SA struct sockaddr
-#define SALT_SIZE 16
-#define HASH_SIZE 32
-#define ITERATIONS 10000
-
-const char *USERS_FILE_PATH = "/Users/rrrreins/sisop/funproject/DiscorIT_dir/users.csv";
-const char *CHANNELS_FILE_PATH = "/Users/rrrreins/sisop/funproject/DiscorIT_dir/channels.csv";
+#define USERS_FILE_PATH "/Users/rrrreins/sisop/funproject/DiscorIT_dir/users.csv"
+#define CHANNELS_FILE_PATH "/Users/rrrreins/sisop/funproject/DiscorIT_dir/channels.csv"
 
 void *handle_client(void *arg);
 void register_user(int connfd, const char *username, const char *password);
 void login_user(int connfd, const char *username, const char *password);
 void create_channel(int connfd, const char *channel_name, const char *key);
-void generate_salt(unsigned char *salt);
-void hash_password(const char *password, const unsigned char *salt, unsigned char *hashed_password);
+void list_channels(int connfd);
+int join_channel(int client_socket, const char *username, const char *channel, const char *key);
 int get_next_user_id(FILE *file);
-int get_next_channel_id(FILE *file);
 
 int main() {
     int sockfd, connfd;
@@ -80,6 +73,7 @@ void *handle_client(void *arg) {
     int connfd = *(int *)arg;
     char buffer[MAX];
     int n;
+    char username[MAX] = "";
 
     while ((n = read(connfd, buffer, sizeof(buffer))) > 0) {
         buffer[n] = '\0';
@@ -92,18 +86,190 @@ void *handle_client(void *arg) {
             char *password = strtok(NULL, " ");
             register_user(connfd, username, password);
         } else if (strcmp(command, "LOGIN") == 0) {
-            char *username = strtok(NULL, " ");
+            strcpy(username, strtok(NULL, " "));
             char *password = strtok(NULL, " ");
             login_user(connfd, username, password);
         } else if (strcmp(command, "CREATE") == 0 && strcmp(strtok(NULL, " "), "CHANNEL") == 0) {
             char *channel_name = strtok(NULL, " ");
             char *key = strtok(NULL, " ");
             create_channel(connfd, channel_name, key);
+        } else if (strcmp(command, "LIST") == 0 && strcmp(strtok(NULL, " "), "CHANNELS") == 0) {
+            list_channels(connfd);
+        } else if (strcmp(command, "JOIN") == 0 && strcmp(strtok(NULL, " "), "CHANNEL") == 0) {
+            char *channel_name = strtok(NULL, " ");
+            char *key = NULL; // initialize to NULL, it will be read from client later
+            join_channel(connfd, username, channel_name, key);
         }
     }
 
     close(connfd);
     pthread_exit(NULL);
+}
+
+int join_channel(int client_socket, const char *username, const char *channel, const char *key) {
+    FILE *file = fopen(CHANNELS_FILE_PATH, "r");
+    if (!file) {
+        perror("fopen");
+        return 0;
+    }
+
+    char line[MAX];
+    int channel_found = 0;
+    int is_user = 0;
+    int user_in_auth = 0;
+    char user_role[MAX] = "";
+
+    // Ambil role user dari file users.csv
+    FILE *user_file = fopen(USERS_FILE_PATH, "r");
+    if (!user_file) {
+        perror("fopen");
+        fclose(file);
+        return 0;
+    }
+
+    char user_line[MAX];
+    while (fgets(user_line, sizeof(user_line), user_file)) {
+        char stored_username[MAX], stored_role[MAX];
+        sscanf(user_line, "%*d,%[^,],%*[^,],%s", stored_username, stored_role);
+        if (strcmp(stored_username, username) == 0) {
+            strcpy(user_role, stored_role);
+            break;
+        }
+    }
+    fclose(user_file);
+
+    // Case 1: Check if user is ROOT or ADMIN
+    if (strcmp(user_role, "ROOT") == 0 || strcmp(user_role, "ADMIN") == 0) {
+        channel_found = 1;
+
+        // Add the user to auth.csv as ROOT or ADMIN if not already in auth.csv
+        char auth_file_path[MAX];
+        snprintf(auth_file_path, sizeof(auth_file_path), "/Users/rrrreins/sisop/funproject/DiscorIT_dir/%s/admin/auth.csv", channel);
+        FILE *auth_file = fopen(auth_file_path, "r");
+        if (!auth_file) {
+            perror("fopen");
+            fclose(file);
+            return 0;
+        }
+
+        char auth_line[MAX];
+        while (fgets(auth_line, sizeof(auth_line), auth_file)) {
+            char stored_user[MAX];
+            sscanf(auth_line, "%*d,%[^,],%*s", stored_user);
+            if (strcmp(stored_user, username) == 0) {
+                user_in_auth = 1;
+                break;
+            }
+        }
+        fclose(auth_file);
+
+        if (!user_in_auth) {
+            auth_file = fopen(auth_file_path, "a");
+            if (!auth_file) {
+                perror("fopen");
+                fclose(file);
+                return 0;
+            }
+
+            // Mengambil ID pengguna
+            int user_id = 0;
+            user_file = fopen(USERS_FILE_PATH, "r");
+            if (user_file) {
+                while (fgets(user_line, sizeof(user_line), user_file)) {
+                    sscanf(user_line, "%d,%*[^,],%*[^,],%*s", &user_id);
+                }
+                fclose(user_file);
+            }
+
+            fprintf(auth_file, "%d,%s,%s\n", user_id, username, user_role);
+            fclose(auth_file);
+        }
+    } else {
+        // Case 2: Check if the user is already in auth.csv of the channel
+        char auth_file_path[MAX];
+        snprintf(auth_file_path, sizeof(auth_file_path), "/Users/rrrreins/sisop/funproject/DiscorIT_dir/%s/admin/auth.csv", channel);
+        FILE *auth_file = fopen(auth_file_path, "r");
+        if (!auth_file) {
+            perror("fopen");
+            fclose(file);
+            return 0;
+        }
+
+        int user_found_in_auth = 0;
+        char auth_line[MAX];
+        while (fgets(auth_line, sizeof(auth_line), auth_file)) {
+            char stored_user[MAX];
+            sscanf(auth_line, "%*d,%[^,],%*s", stored_user);
+            if (strcmp(stored_user, username) == 0) {
+                user_found_in_auth = 1;
+                break;
+            }
+        }
+        fclose(auth_file);
+
+        if (user_found_in_auth) {
+            channel_found = 1;
+        } else {
+            // Check the key if user is not found in auth.csv
+            while (fgets(line, sizeof(line), file)) {
+                char stored_channel[MAX], stored_key[MAX];
+                sscanf(line, "%*d,%[^,],%s", stored_channel, stored_key);
+
+                if (strcmp(stored_channel, channel) == 0) {
+                    channel_found = 1;
+                    if (key == NULL || strcmp(stored_key, key) != 0) {
+                        write(client_socket, "Key: ", strlen("Key: "));
+                        char input_key[MAX];
+                        int valread = read(client_socket, input_key, MAX);
+                        input_key[valread] = '\0'; // Remove newline
+                        if (strcmp(input_key, stored_key) != 0) {
+                            write(client_socket, "Key salah\n", strlen("Key salah\n"));
+                            fclose(file);
+                            return 0;
+                        }
+                    }
+
+                    // Add the user to auth.csv as a regular USER
+                    auth_file = fopen(auth_file_path, "a");
+                    if (!auth_file) {
+                        perror("fopen");
+                        fclose(file);
+                        return 0;
+                    }
+
+                    // Mengambil ID pengguna
+                    int user_id = 0;
+                    user_file = fopen(USERS_FILE_PATH, "r");
+                    if (user_file) {
+                        while (fgets(user_line, sizeof(user_line), user_file)) {
+                            sscanf(user_line, "%d,%*[^,],%*[^,],%*s", &user_id);
+                        }
+                        fclose(user_file);
+                    }
+
+                    fprintf(auth_file, "%d,%s,USER\n", user_id, username);
+                    fclose(auth_file);
+                    break;
+                }
+            }
+        }
+    }
+
+    fclose(file);
+
+    if (channel_found) {
+        char msg[MAX];
+        snprintf(msg, sizeof(msg), "[%s/%s] ", username, channel);
+        write(client_socket, msg, strlen(msg));
+
+        char activity[MAX];
+        snprintf(activity, sizeof(activity), "%s bergabung dengan channel %s", username, channel);
+        // log_activity(channel, activity); // Ensure you have this function defined
+        return 1;
+    } else {
+        write(client_socket, "Channel tidak ditemukan\n", strlen("Channel tidak ditemukan\n"));
+        return 0;
+    }
 }
 
 void create_channel(int connfd, const char *channel_name, const char *key) {
@@ -116,67 +282,34 @@ void create_channel(int connfd, const char *channel_name, const char *key) {
         return;
     }
 
-    char admin_path[MAX], room1_path[MAX], room2_path[MAX], room3_path[MAX];
+    char admin_path[MAX];
     snprintf(admin_path, sizeof(admin_path), "%s/admin", path);
-    snprintf(room1_path, sizeof(room1_path), "%s/room1", path);
-    snprintf(room2_path, sizeof(room2_path), "%s/room2", path);
-    snprintf(room3_path, sizeof(room3_path), "%s/room3", path);
-
     mkdir(admin_path, 0777);
-    mkdir(room1_path, 0777);
-    mkdir(room2_path, 0777);
-    mkdir(room3_path, 0777);
 
-    char auth_file[MAX], user_log[MAX], chat1_file[MAX], chat2_file[MAX], chat3_file[MAX];
+    char auth_file[MAX], user_log[MAX];
     snprintf(auth_file, sizeof(auth_file), "%s/auth.csv", admin_path);
     snprintf(user_log, sizeof(user_log), "%s/user.log", admin_path);
-    snprintf(chat1_file, sizeof(chat1_file), "%s/chat.csv", room1_path);
-    snprintf(chat2_file, sizeof(chat2_file), "%s/chat.csv", room2_path);
-    snprintf(chat3_file, sizeof(chat3_file), "%s/chat.csv", room3_path);
 
     FILE *file;
     file = fopen(auth_file, "w"); fclose(file);
     file = fopen(user_log, "w"); fclose(file);
-    file = fopen(chat1_file, "w"); fclose(file);
-    file = fopen(chat2_file, "w"); fclose(file);
-    file = fopen(chat3_file, "w"); fclose(file);
 
-    unsigned char salt[SALT_SIZE];
-    unsigned char hashed_key[HASH_SIZE];
-    generate_salt(salt);
-    hash_password(key, salt, hashed_key);
-
+    // Write to channels.csv
     file = fopen(CHANNELS_FILE_PATH, "a+");
     if (file == NULL) {
         perror("Failed to open channels.csv");
-        write(connfd, "CREATE CHANNEL FAILED", strlen("CREATE CHANNEL FAILED"));
         return;
     }
 
-    int id = get_next_channel_id(file);
+    int id = get_next_user_id(file);
 
-    fprintf(file, "%d,%s,", id, channel_name);
-    for (int i = 0; i < SALT_SIZE; i++) {
-        fprintf(file, "%02x", salt[i]);
-    }
-    fprintf(file, ",");
-    for (int i = 0; i < HASH_SIZE; i++) {
-        fprintf(file, "%02x", hashed_key[i]);
-    }
-    fprintf(file, "\n");
+    fprintf(file, "%d,%s,%s\n", id, channel_name, key);
     fclose(file);
 
     write(connfd, "CREATE CHANNEL SUCCESS", strlen("CREATE CHANNEL SUCCESS"));
 }
 
 void register_user(int connfd, const char *username, const char *password) {
-    printf("Registering user: %s\n", username); // Debug log
-    unsigned char salt[SALT_SIZE];
-    unsigned char hashed_password[HASH_SIZE];
-
-    generate_salt(salt);
-    hash_password(password, salt, hashed_password);
-
     FILE *file = fopen(USERS_FILE_PATH, "a+");
     if (file == NULL) {
         perror("Failed to open users.csv");
@@ -187,12 +320,10 @@ void register_user(int connfd, const char *username, const char *password) {
     rewind(file);
     char line[MAX];
     while (fgets(line, sizeof(line), file)) {
-        char *token = strtok(line, ",");
-        token = strtok(NULL, ",");
-        printf("Checking existing username: %s\n", token); // Debug log
-        if (strcmp(token, username) == 0) {
+        char stored_username[MAX];
+        sscanf(line, "%*d,%[^,],%*[^,],%*s", stored_username);
+        if (strcmp(stored_username, username) == 0) {
             write(connfd, "REGISTER FAILED", strlen("REGISTER FAILED"));
-            printf("REGISTER FAILED: %s already exists\n", username); // Debug log
             fclose(file);
             return;
         }
@@ -206,27 +337,13 @@ void register_user(int connfd, const char *username, const char *password) {
     const char *role = (id == 1) ? "ROOT" : "USER";
 
     // Register the new user
-    fprintf(file, "%d,%s,", id, username);
-    for (int i = 0; i < SALT_SIZE; i++) {
-        fprintf(file, "%02x", salt[i]);
-    }
-    fprintf(file, ",");
-    for (int i = 0; i < HASH_SIZE; i++) {
-        fprintf(file, "%02x", hashed_password[i]);
-    }
-    fprintf(file, ",%s\n", role);
+    fprintf(file, "%d,%s,%s,%s\n", id, username, password, role);
     write(connfd, "REGISTER SUCCESS", strlen("REGISTER SUCCESS"));
-    printf("REGISTER SUCCESS: %s registered successfully\n", username); // Debug log
 
     fclose(file);
 }
 
 void login_user(int connfd, const char *username, const char *password) {
-    printf("Logging in user: %s\n", username); // Debug log
-    unsigned char salt[SALT_SIZE];
-    unsigned char stored_hashed_password[HASH_SIZE];
-    unsigned char hashed_password[HASH_SIZE];
-
     FILE *file = fopen(USERS_FILE_PATH, "r");
     if (file == NULL) {
         perror("Failed to open users.csv");
@@ -236,75 +353,53 @@ void login_user(int connfd, const char *username, const char *password) {
     char line[MAX];
     int login_success = 0;  // Flag to check if login is successful
     while (fgets(line, sizeof(line), file)) {
-        char *token = strtok(line, ",");
-        int id = atoi(token);
-        token = strtok(NULL, ",");
-        char *stored_username = token;
-        token = strtok(NULL, ",");
-        printf("Checking username: %s\n", stored_username); // Debug log
+        char stored_username[MAX], stored_password[MAX];
+        sscanf(line, "%*d,%[^,],%[^,],%*s", stored_username, stored_password);
 
-        for (int i = 0; i < SALT_SIZE; i++) {
-            unsigned int value;
-            sscanf(token + 2 * i, "%02x", &value);
-            salt[i] = (unsigned char)value;
-        }
-        token = strtok(NULL, ",");
-
-        for (int i = 0; i < HASH_SIZE; i++) {
-            unsigned int value;
-            sscanf(token + 2 * i, "%02x", &value);
-            stored_hashed_password[i] = (unsigned char)value;
-        }
-
-        if (strcmp(stored_username, username) == 0) {
-            hash_password(password, salt, hashed_password);
-            if (memcmp(stored_hashed_password, hashed_password, HASH_SIZE) == 0) {
-                write(connfd, "LOGIN SUCCESS", strlen("LOGIN SUCCESS"));
-                login_success = 1;
-                printf("LOGIN SUCCESS: %s logged in successfully\n", username); // Debug log
-                break;
-            } else {
-                printf("Password mismatch for user: %s\n", username); // Debug log
-            }
+        if (strcmp(stored_username, username) == 0 && strcmp(stored_password, password) == 0) {
+            write(connfd, "LOGIN SUCCESS", strlen("LOGIN SUCCESS"));
+            login_success = 1;
+            break;
         }
     }
 
     if (!login_success) {
         write(connfd, "LOGIN FAILED", strlen("LOGIN FAILED"));
-        printf("LOGIN FAILED: %s not found or password mismatch\n", username); // Debug log
     }
 
     fclose(file);
 }
 
-void generate_salt(unsigned char *salt) {
-    if (RAND_bytes(salt, SALT_SIZE) != 1) {
-        fprintf(stderr, "Failed to generate salt\n");
-        exit(1);
+void list_channels(int connfd) {
+    FILE *file = fopen(CHANNELS_FILE_PATH, "r");
+    if (file == NULL) {
+        perror("Failed to open channels.csv");
+        write(connfd, "LIST CHANNELS FAILED", strlen("LIST CHANNELS FAILED"));
+        return;
     }
-}
 
-void hash_password(const char *password, const unsigned char *salt, unsigned char *hashed_password) {
-    if (PKCS5_PBKDF2_HMAC(password, strlen(password), salt, SALT_SIZE, ITERATIONS, EVP_sha256(), HASH_SIZE, hashed_password) != 1) {
-        fprintf(stderr, "Failed to hash password\n");
-        exit(1);
+    char line[MAX];
+    char channels[MAX] = "";
+
+    while (fgets(line, sizeof(line), file)) {
+        char stored_channel[MAX];
+        sscanf(line, "%*d,%[^,],%*s", stored_channel);
+        strcat(channels, stored_channel);
+        strcat(channels, " ");
     }
+
+    fclose(file);
+
+    write(connfd, channels, strlen(channels));
 }
 
 int get_next_user_id(FILE *file) {
-    int id = 1;
+    int id = 0;
     char line[MAX];
-    while (fgets(line, sizeof(line), file)) {
-        id++;
-    }
-    return id;
-}
 
-int get_next_channel_id(FILE *file) {
-    int id = 1;
-    char line[MAX];
     while (fgets(line, sizeof(line), file)) {
-        id++;
+        sscanf(line, "%d,", &id);
     }
-    return id;
+
+    return id + 1;
 }
