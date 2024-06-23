@@ -90,6 +90,7 @@ void hash_password(const char *password, const unsigned char *salt, unsigned cha
         fprintf(stderr, "Failed to hash password\n");
         exit(1);
     }
+    
 }
 
 int verify_password(const char *password, const unsigned char *salt, const unsigned char *hashed_password) {
