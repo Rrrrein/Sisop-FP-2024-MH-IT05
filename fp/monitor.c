@@ -1,3 +1,5 @@
+// masih belum selesai
+
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
