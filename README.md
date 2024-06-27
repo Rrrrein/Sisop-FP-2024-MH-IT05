@@ -735,6 +735,8 @@ Membaca Balasan dari Server: Membaca balasan dari server setelah verifikasi kunc
 
 ## Kekurangan
 - Belum membuat monitor.c untuk melihat aktivitas apa saja yang dilakukan
+- server.c belum berjalan secara daemon
 - Fitur belum lengkap, seperti fitur ban, unban, dan lainnya
+- Output belum sesuai dengan permintaan soal
 
 ## Revisi
