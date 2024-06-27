@@ -18,7 +18,7 @@ https://docs.google.com/document/d/1UUyfuqa0m_SRYbrLS5rHP0sIhpCOleZEiWND4s7RwII/
 
 ## Penyelesaian
 
-#### Server.c
+### Server.c
 #### - Header dan Definisi Makro
 ```c
 #include <stdio.h>
@@ -515,3 +515,220 @@ int get_next_user_id(FILE *file) {
 ```
 Mendapatkan ID Pengguna Berikutnya: Membaca file dan mengambil ID pengguna terakhir, kemudian mengembalikan ID berikutnya.
 
+### Discorit.c
+#### - Header File dan Makro
+```c
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <unistd.h>
+#include <arpa/inet.h>
+
+#define MAX 1024
+#define PORT 8080
+#define SA struct sockaddr
+```
+Header File: Menyertakan pustaka yang diperlukan untuk input/output, manipulasi memori, jaringan, dan penanganan socket.
+
+Makro: Mendefinisikan konstanta untuk ukuran buffer (MAX), port server (PORT), dan tipe data struct sockaddr sebagai SA untuk mempermudah penulisan kode.
+
+#### - Deklarasi Fungsi
+```c
+void register_user(int sockfd, const char *username, const char *password);
+void login_user(int sockfd, const char *username, const char *password);
+void create_channel(int sockfd, const char *channel_name, const char *key);
+void list_channels(int sockfd);
+void join_channel(int sockfd, const char *username, const char *channel_name);
+```
+register_user: Fungsi untuk mendaftarkan pengguna baru.
+
+login_user: Fungsi untuk login pengguna.
+
+create_channel: Fungsi untuk membuat saluran baru.
+
+list_channels: Fungsi untuk mencantumkan semua saluran.
+
+join_channel: Fungsi untuk bergabung dengan saluran tertentu.
+
+#### - Fungsi 'Main'
+```c
+int main(int argc, char *argv[]) {
+    if (argc < 2) {
+        fprintf(stderr, "Usage: %s <command> [<args>]\n", argv[0]);
+        exit(1);
+    }
+
+    int sockfd;
+    struct sockaddr_in servaddr;
+
+    // Membuat socket
+    if ((sockfd = socket(AF_INET, SOCK_STREAM, 0)) == -1) {
+        perror("socket creation failed");
+        exit(1);
+    }
+
+    servaddr.sin_family = AF_INET;
+    servaddr.sin_port = htons(PORT);
+    servaddr.sin_addr.s_addr = INADDR_ANY;
+
+    // Menghubungkan ke server
+    if (connect(sockfd, (SA *)&servaddr, sizeof(servaddr)) != 0) {
+        perror("connection with the server failed");
+        exit(1);
+    }
+
+    if (strcmp(argv[1], "REGISTER") == 0) {
+        if (argc != 5 || strcmp(argv[3], "-p") != 0) {
+            fprintf(stderr, "Usage: %s REGISTER <username> -p <password>\n", argv[0]);
+            exit(1);
+        }
+        register_user(sockfd, argv[2], argv[4]);
+    } else if (strcmp(argv[1], "LOGIN") == 0) {
+        if (argc != 5 || strcmp(argv[3], "-p") != 0) {
+            fprintf(stderr, "Usage: %s LOGIN <username> -p <password>\n", argv[0]);
+            exit(1);
+        }
+        login_user(sockfd, argv[2], argv[4]);
+    } else {
+        fprintf(stderr, "Unknown command: %s\n", argv[1]);
+        exit(1);
+    }
+
+    close(sockfd);
+    return 0;
+}
+```
+Pengecekan Argumen: Memeriksa apakah ada argumen yang diberikan saat menjalankan program. Jika tidak ada, menampilkan pesan penggunaan dan keluar.
+
+Membuat Socket: Membuat socket untuk komunikasi.
+
+Mengatur Alamat Server: Mengatur alamat IP dan port server.
+
+Menghubungkan ke Server: Menghubungkan ke server menggunakan socket yang dibuat.
+
+Menangani Perintah: Memeriksa perintah yang diberikan (REGISTER atau LOGIN) dan memanggil fungsi yang sesuai dengan argumen yang diberikan.
+
+#### - Fungsi 'register_user'
+```c
+void register_user(int sockfd, const char *username, const char *password) {
+    char buffer[MAX];
+    snprintf(buffer, sizeof(buffer), "REGISTER %s %s", username, password);
+    write(sockfd, buffer, strlen(buffer));
+    int n = read(sockfd, buffer, sizeof(buffer) - 1);
+    buffer[n] = '\0';
+    printf("Server response: %s\n", buffer);
+}
+```
+Membentuk Pesan: Membentuk pesan REGISTER dengan username dan password yang diberikan.
+
+Mengirim Pesan ke Server: Mengirim pesan ke server melalui socket.
+
+Membaca Balasan dari Server: Membaca balasan dari server dan menampilkannya ke pengguna.
+
+#### - Fungsi 'login_user'
+```c
+void login_user(int sockfd, const char *username, const char *password) {
+    char buffer[MAX];
+    snprintf(buffer, sizeof(buffer), "LOGIN %s %s", username, password);
+    write(sockfd, buffer, strlen(buffer));
+    int n = read(sockfd, buffer, sizeof(buffer) - 1);
+    buffer[n] = '\0';
+    printf("Server response: %s\n", buffer);
+
+    if (strcmp(buffer, "LOGIN SUCCESS") == 0) {
+        char command[MAX];
+        printf("[%s] ", username);
+        while (fgets(command, sizeof(command), stdin)) {
+            command[strcspn(command, "\n")] = 0; // Hapus newline di akhir
+
+            if (strncmp(command, "CREATE CHANNEL", 14) == 0) {
+                char *channel_name = strtok(command + 15, " ");
+                char *key = strtok(NULL, " ");
+                create_channel(sockfd, channel_name, key);
+            } else if (strncmp(command, "LIST CHANNELS", 13) == 0) {
+                list_channels(sockfd);
+            } else if (strncmp(command, "JOIN CHANNEL", 12) == 0) {
+                char *channel_name = strtok(command + 13, " ");
+                join_channel(sockfd, username, channel_name);
+            }
+            printf("[%s] ", username);
+        }
+    } else {
+        printf("Login gagal\n");
+    }
+}
+```
+Membentuk Pesan: Membentuk pesan LOGIN dengan username dan password yang diberikan.
+
+Mengirim Pesan ke Server: Mengirim pesan ke server melalui socket.
+
+Membaca Balasan dari Server: Membaca balasan dari server dan menampilkannya ke pengguna.
+
+Perintah Tambahan Setelah Login: Jika login berhasil, pengguna dapat memasukkan perintah tambahan seperti CREATE CHANNEL, LIST CHANNELS, dan JOIN CHANNEL.
+
+#### - Fungsi 'create_channel'
+```c
+void create_channel(int sockfd, const char *channel_name, const char *key) {
+    char buffer[MAX];
+    snprintf(buffer, sizeof(buffer), "CREATE CHANNEL %s %s", channel_name, key);
+    write(sockfd, buffer, strlen(buffer));
+    int n = read(sockfd, buffer, sizeof(buffer) - 1);
+    buffer[n] = '\0';
+    printf("Server response: %s\n", buffer);
+}
+```
+Membentuk Pesan: Membentuk pesan CREATE CHANNEL dengan nama saluran dan kunci yang diberikan.
+
+Mengirim Pesan ke Server: Mengirim pesan ke server melalui socket.
+
+Membaca Balasan dari Server: Membaca balasan dari server dan menampilkannya ke pengguna.
+
+#### - Fungsi 'list_channels'
+```c
+void list_channels(int sockfd) {
+    char buffer[MAX];
+    snprintf(buffer, sizeof(buffer), "LIST CHANNELS");
+    write(sockfd, buffer, strlen(buffer));
+    int n = read(sockfd, buffer, sizeof(buffer) - 1);
+    buffer[n] = '\0';
+    printf("Server response: %s\n", buffer);
+}
+```
+Membentuk Pesan: Membentuk pesan LIST CHANNELS.
+
+Mengirim Pesan ke Server: Mengirim pesan ke server melalui socket.
+
+Membaca Balasan dari Server: Membaca balasan dari server dan menampilkannya ke pengguna.
+
+#### - Fungsi 'join_channel'
+```c
+void join_channel(int sockfd, const char *username, const char *channel_name) {
+    char buffer[MAX];
+    snprintf(buffer, sizeof(buffer), "JOIN CHANNEL %s", channel_name);
+    write(sockfd, buffer, strlen(buffer));
+
+    // Membaca prompt kunci dari server
+    int n = read(sockfd, buffer, sizeof(buffer) - 1);
+    buffer[n] = '\0';
+    printf("%s", buffer); // "Key: "
+
+    // Mendapatkan input kunci dari pengguna
+    fgets(buffer, sizeof(buffer), stdin);
+    buffer[strcspn(buffer, "\n")] = 0; // Hapus newline di akhir
+    write(sockfd, buffer, strlen(buffer));
+
+    // Membaca balasan dari server setelah verifikasi kunci
+    n = read(sockfd, buffer, sizeof(buffer) - 1);
+    buffer[n] = '\0';
+    printf("Server response: %s\n", buffer);
+}
+```
+Membentuk Pesan: Membentuk pesan JOIN CHANNEL dengan nama saluran yang diberikan.
+
+Mengirim Pesan ke Server: Mengirim pesan ke server melalui socket.
+
+Membaca Prompt Kunci dari Server: Membaca prompt kunci dari server dan menampilkannya ke pengguna.
+
+Mengambil Input Kunci dari Pengguna: Mendapatkan input kunci dari pengguna dan mengirimkannya ke server.
+
+Membaca Balasan dari Server: Membaca balasan dari server setelah verifikasi kunci dan menampilkannya ke pengguna.
