@@ -732,3 +732,9 @@ Membaca Prompt Kunci dari Server: Membaca prompt kunci dari server dan menampilk
 Mengambil Input Kunci dari Pengguna: Mendapatkan input kunci dari pengguna dan mengirimkannya ke server.
 
 Membaca Balasan dari Server: Membaca balasan dari server setelah verifikasi kunci dan menampilkannya ke pengguna.
+
+## Kekurangan
+- Belum membuat monitor.c untuk melihat aktivitas apa saja yang dilakukan
+- Fitur belum lengkap, seperti fitur ban, unban, dan lainnya
+
+## Revisi
