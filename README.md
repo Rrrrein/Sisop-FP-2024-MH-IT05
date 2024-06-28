@@ -434,6 +434,14 @@ Menentukan Peran Pengguna: Menentukan peran pengguna (ROOT untuk pengguna pertam
 
 Mendaftarkan Pengguna Baru: Menambahkan pengguna baru ke users.csv.
 
+![image](https://github.com/Rrrrein/Sisop-FP-2024-MH-IT05/assets/136203533/2b02659e-051e-49ba-9c90-2ce8fa1c0356)
+
+>Hasil dari respons client
+
+![image](https://github.com/Rrrrein/Sisop-FP-2024-MH-IT05/assets/136203533/c16c9136-d25f-46d9-ba1a-d136c1592935)
+
+>Hasil dari server
+
 #### - Fungsi 'login_user'
 ```c
 void login_user(int connfd, const char *username, const char *password) {
@@ -468,6 +476,12 @@ Membuka File users.csv: Membuka file users.csv untuk memverifikasi login.
 Memeriksa Kredensial Pengguna: Memeriksa apakah username dan password sesuai.
 
 Mengirim Balasan Login: Mengirim balasan ke klien apakah login berhasil atau gagal.
+
+![image](https://github.com/Rrrrein/Sisop-FP-2024-MH-IT05/assets/136203533/68c2f3fa-0c83-4d7a-bcf6-f06a840f465e)
+>Respons dan hasil client
+
+![image](https://github.com/Rrrrein/Sisop-FP-2024-MH-IT05/assets/136203533/6b6ce430-ecda-4358-887a-18daf8891788)
+>Respons dari server
 
 #### - Fungsi 'list_channel'
 ```c
